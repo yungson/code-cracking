@@ -1,0 +1,134 @@
+---
+title: "code_cracking"
+output: pdf_document
+author: Yongsheng Li
+date: "4/5/2021"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Method
+
+The hastings ratio is: $hprob = min(1,\frac{P(D|\theta')\cdot \pi(\theta')q(\theta'\rightarrow{\theta})}{P(D|\theta)\cdot \pi(\theta)q(\theta\rightarrow{\theta'})})$, With our assumptions, $\pi(\theta')q(\theta'\rightarrow{\theta})=\pi(\theta)q(\theta\rightarrow{\theta'})$, so,     
+$hprob = min(1,\frac{P(D|\theta')}{P(D|\theta)})=min(1,exp(log(P(D|\theta')-P(D|\theta)))$, and we will move to $\theta'$ if `runif(1)<hprob`.          
+
+
+1. read in data and normalize the frequency to propabilities
+
+```{r}
+# read coded message
+input1 = readLines("CodedMessage.txt", n=1000) 
+
+# read frequency table 
+q = as.matrix(read.table("LetterPairFreqFrom7Novels.txt",header=F))
+# using q as the probabilities, so normalizing to 1 by the sum of all
+q=q/sum(q)
+colnames(q) = letters
+rownames(q) = letters
+```
+
+2. extract the word-pairs from the input
+
+```{r}
+#
+extract_pairs = function(input){
+  pairs = c()
+  for(i in 1:nchar(input)-1){
+    w1 = tolower(substring(input, i, i))
+    w2 = tolower(substring(input, i+1, i+1))
+    if ((w1 %in% letters) & (w2 %in% letters)){
+      pairs = rbind(pairs, c(w1,w2))
+    }
+  }
+  return(pairs)
+}
+# extract pairs from the long passage
+pairs = extract_pairs(input1)
+```
+
+3. define a function to calculate log probability given two words and the code table
+
+```{r}
+cal_logl = function(w1,w2,q,code){
+  w1_real = letters[code==w1]
+  w2_real = letters[code==w2]
+  prob = q[w1_real, w2_real]
+  return(log(prob))
+}
+```
+
+4. define the mcmc process to sample from the posterior distribution of code table and iterate it for some iterations.
+
+```{r}
+mcmc_posterior = function(n,seed=2021){
+  set.seed(seed)
+  code = sample(letters)
+  logl_max = -Inf
+  code_max = code
+  logl = vector("numeric",n)
+  for (i in 1:n){
+    new_code = code
+    
+    # propose a new code table by randomly switching two letters
+    proposal = sample(1:26,2)
+    temp = new_code[proposal[1]]
+    new_code[proposal[1]] = new_code[proposal[2]]
+    new_code[proposal[2]] = temp
+    
+    # calculate the log probability before and after switching
+    logl_before = sum(apply(pairs,1,FUN = function(x){cal_logl(x[1],x[2],q,code)}))
+    logl_after = sum(apply(pairs,1,FUN=function(x){cal_logl(x[1],x[2],q,new_code)}))
+    logl[i] = logl_after
+    
+    # record the best code table with which maximizes logl_after up to now
+    if (logl_after>logl_max){
+      logl_max = logl_after
+      code_max = new_code
+    }
+    # define the hprob
+    hprob = min(1,exp(logl_after-logl_before))
+    
+    # move to new code with prob.= hprob
+    u = runif(1)
+    if (u<hprob){
+      code = new_code
+    }
+    if (i%%1000==0){
+      cat(i," iterations completed","\n")
+    }
+  }
+  return(code_max)
+}
+code = mcmc_posterior(5000, seed=2021)
+```
+
+
+5. decode the coded text using the code sampled from mcmc_posterior.
+
+```{r}
+decode = function(code,input){
+  text = c()
+  for(i in 1:nchar(input)-1){
+    w = tolower(substring(input, i, i))
+    if (w %in% letters){
+      text = c(text,letters[code==w])
+    }else{
+      text = c(text, w)
+    }
+  }
+  return(paste(text, collapse = ""))
+}
+text = decode(code,input1)
+text=strsplit(text,split=" ")[[1]]
+for (i in 1:1087){
+  cat(text[i]," ")
+  if (i%%10==0){
+    cat("\n")
+  }
+}
+```
+
+
+
